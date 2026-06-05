@@ -96,6 +96,26 @@ func NewNeo4jMCPServer(version string, cfg *config.Config, dbService database.Se
 			}
 			return filteredTools
 		}),
+		server.WithToolHandlerMiddleware(func(next server.ToolHandlerFunc) server.ToolHandlerFunc {
+			return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				readOnly := mcpcontext.GetReadOnly(ctx)
+				if readOnly == nil || *readOnly == false {
+					return next(ctx, req)
+				}
+
+				serverTool := server.ServerFromContext(ctx).GetTool(req.Params.Name)
+				if serverTool == nil {
+					return next(ctx, req)
+				}
+
+				readOnlyHint := serverTool.Tool.Annotations.ReadOnlyHint
+				if readOnlyHint != nil && *readOnlyHint {
+					return next(ctx, req)
+				}
+
+				return mcp.NewToolResultError(fmt.Sprintf("'%s' is not permitted in read-only mode", req.Params.Name)), nil
+			}
+		}),
 	)
 
 	neo4jServer.MCPServer = mcpServer
